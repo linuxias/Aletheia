@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code
+#   Local (personal) settings and session-generated files. Shared files such as
+#   CLAUDE.md, .claude/settings.json, .claude/commands/, and .claude/agents/
+#   are intended to be committed and are not ignored.
+.claude/settings.local.json
+.claude/worktrees/
