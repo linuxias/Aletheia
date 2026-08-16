@@ -1,7 +1,7 @@
 """
 Aletheia 엔트리포인트 - Claude Code / Hermes 스타일 터미널 인터페이스.
 
-실행: python3 main.py
+실행: uv run aletheia (또는 python3 aletheia.py)
 필요 환경변수: ANTHROPIC_API_KEY
 
 인터랙션 특징:
