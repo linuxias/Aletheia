@@ -7,10 +7,10 @@ license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.40.0",
+    "openai>=3.1.0",
     "rich>=13.7.0",
 ]
 
-# uv run aletheia 로 실행
 [project.scripts]
 aletheia = "aletheia:main"
 
@@ -19,6 +19,5 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-# 평평한 레이아웃: 루트 모듈과 하위 패키지를 명시적으로 지정한다.
 py-modules = ["aletheia", "config"]
-packages = ["core", "ui"]
+packages = ["core", "core.llm", "ui"]
