@@ -1,0 +1,14 @@
+$accent: #00ff00;   /* ANSI bright green — matches rich "bright_green" in the old console UI */
+
+#transcript { height: 1fr; padding: 0 1; }
+
+SplashView { height: auto; margin: 1 1; padding: 1 2; border: round $accent; }
+#wordmark  { color: $accent; width: auto; margin-right: 2; }
+#info      { width: 1fr; }
+#summary   { color: $text-disabled; margin-top: 1; }
+
+#status { height: 1; color: $text-disabled; padding: 0 1; }
+
+#input-row { height: auto; padding: 0 1; }
+#prompt    { width: auto; height: 3; padding: 0 1; content-align: left middle; color: cyan; }
+#input     { height: 3; width: 1fr; }

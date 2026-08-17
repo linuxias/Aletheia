@@ -9,6 +9,7 @@ dependencies = [
     "anthropic>=0.40.0",
     "openai>=3.1.0",
     "rich>=13.7.0",
+    "textual>=8.2.8",
 ]
 
 [project.scripts]
@@ -20,4 +21,13 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["aletheia", "config"]
-packages = ["core", "core.llm", "ui"]
+packages = ["core", "core.llm", "ui", "ui.tui"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
