@@ -19,6 +19,12 @@ aletheia = "aletheia:main"
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "e2e: real-API end-to-end tests (set ALETHEIA_E2E=1 and LLM_KEY to run)",
+]
+
 [tool.setuptools]
 py-modules = ["aletheia", "config"]
 packages = ["core", "core.llm", "core.tools", "ui", "ui.tui"]
@@ -28,6 +34,3 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
 ]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
