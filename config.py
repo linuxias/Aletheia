@@ -32,6 +32,9 @@ class Config:
     # Max tokens per response
     MAX_TOKENS = int(os.environ.get("ALETHEIA_MAX_TOKENS", "4096"))
 
+    # Max stream-execute round trips per user input in the tool loop
+    MAX_TOOL_ROUNDS = int(os.environ.get("ALETHEIA_MAX_TOOL_ROUNDS", "20"))
+
     API_KEY = os.environ.get("LLM_KEY")
 
     # When unset, the per-protocol default endpoint (core.llm adapter) is used.

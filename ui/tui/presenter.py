@@ -14,6 +14,32 @@ if TYPE_CHECKING:
     from ui.tui.app import AletheiaApp
 
 
+# Tool output shown in the transcript is trimmed independently of the
+# context-level clipping the tools apply themselves.
+_DISPLAY_CHARS = 2000
+_DISPLAY_LINES = 10
+
+
+def _shorten(text: str, max_chars: int = _DISPLAY_CHARS, max_lines: int = _DISPLAY_LINES) -> str:
+    if len(text) > max_chars:
+        half = max_chars // 2
+        text = (
+            text[:half]
+            + f"\n[... {len(text) - max_chars} characters truncated ...]\n"
+            + text[-half:]
+        )
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        keep = max_lines // 2
+        omitted = len(lines) - 2 * keep
+        text = (
+            "\n".join(lines[:keep])
+            + f"\n[... {omitted} lines truncated ...]\n"
+            + "\n".join(lines[-keep:])
+        )
+    return text
+
+
 class AgentPresenter:
     """Runs Agent turns on worker threads and renders observer callbacks on the UI thread.
 
@@ -72,6 +98,12 @@ class AgentPresenter:
     def interrupted(self, label: str) -> None:
         self._app.call_from_thread(self._on_interrupted)
 
+    def tool_call(self, label: str, name: str, summary: str) -> None:
+        self._app.call_from_thread(self._on_tool_call, name, summary)
+
+    def tool_result(self, label: str, name: str, output: str, is_error: bool) -> None:
+        self._app.call_from_thread(self._on_tool_result, name, output, is_error)
+
     # ---- worker body (worker thread) ----
 
     def _run_turn(self, text: str) -> None:
@@ -122,6 +154,17 @@ class AgentPresenter:
         self._flush(force=True)
         self._transcript.append_note("[interrupted]")
         self._finish("interrupted")
+
+    def _on_tool_call(self, name: str, summary: str) -> None:
+        self._flush(force=True)
+        line = f"{name} {summary}".rstrip()
+        self._transcript.append_note(f"tool {line}")
+
+    def _on_tool_result(self, name: str, output: str, is_error: bool) -> None:
+        self._flush(force=True)
+        body = output.strip() or "(no output)"
+        prefix = "[tool error] " if is_error else ""
+        self._transcript.append_note(f"{prefix}{name}: {_shorten(body)}", error=is_error)
 
     def _on_error(self, error: Exception) -> None:
         self._flush(force=True)

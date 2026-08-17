@@ -17,6 +17,10 @@ class AgentObserver(Protocol):
 
     def interrupted(self, label: str) -> None: ...
 
+    def tool_call(self, label: str, name: str, summary: str) -> None: ...
+
+    def tool_result(self, label: str, name: str, output: str, is_error: bool) -> None: ...
+
 
 class NullObserver:
     """No-op observer for programmatic use (tests, scripts)."""
@@ -31,4 +35,10 @@ class NullObserver:
         pass
 
     def interrupted(self, label: str) -> None:
+        pass
+
+    def tool_call(self, label: str, name: str, summary: str) -> None:
+        pass
+
+    def tool_result(self, label: str, name: str, output: str, is_error: bool) -> None:
         pass

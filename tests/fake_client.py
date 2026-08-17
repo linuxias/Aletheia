@@ -3,6 +3,7 @@ import time
 from typing import Iterator, List, Optional, Sequence
 
 from core.llm.base import LLMClient
+from core.llm.events import TextDelta
 
 
 class FakeStreamClient(LLMClient):
@@ -29,9 +30,10 @@ class FakeStreamClient(LLMClient):
         max_tokens: int,
         system: str,
         messages: List[dict],
-    ) -> Iterator[str]:
+        tools: Optional[List[dict]] = None,
+    ) -> Iterator[TextDelta]:
         if self._error is not None:
             raise self._error
         for chunk in self._chunks:
             time.sleep(self._delay)
-            yield chunk
+            yield TextDelta(chunk)
