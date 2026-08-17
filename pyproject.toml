@@ -21,7 +21,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["aletheia", "config"]
-packages = ["core", "core.llm", "ui", "ui.tui"]
+packages = ["core", "core.llm", "core.tools", "ui", "ui.tui"]
 
 [dependency-groups]
 dev = [
