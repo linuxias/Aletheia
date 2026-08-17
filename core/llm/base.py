@@ -9,6 +9,8 @@ object from core.llm.create_client.
 from abc import ABC, abstractmethod
 from typing import ClassVar, Iterator, List, Optional
 
+from core.llm.events import StreamEvent
+
 
 class LLMClient(ABC):
     """Protocol-independent LLM connection interface.
@@ -39,10 +41,27 @@ class LLMClient(ABC):
         max_tokens: int,
         system: str,
         messages: List[dict],
-    ) -> Iterator[str]:
-        """Yield the response text as deltas.
+        tools: Optional[List[dict]] = None,
+    ) -> Iterator[StreamEvent]:
+        """Yield TextDelta for each visible text fragment and exactly one
+        ToolCall per completed tool invocation, in order.
 
-        - messages is a list of {"role": "user"|"assistant", "content": str}.
+        - tools is a list of neutral definitions
+          {"name": str, "description": str, "parameters": <JSON Schema dict>}
+          or None when the caller wants plain text-only generation. Adapters
+          must omit the wire tools parameter entirely when tools is None or
+          empty.
+        - messages is the neutral history: {"role": "user"|"assistant",
+          "content": str}, assistant entries whose content is a list of
+          {"type": "text", "text"} / {"type": "tool_use", "id", "name",
+          "input"} blocks, and {"role": "tool", "tool_call_id", "content",
+          "is_error"} result entries. Adapters translate to their wire
+          format and must preserve ordering (Anthropic requires every
+          tool_use to be answered by a tool_result in the immediately
+          following user message).
+        - ToolCall.arguments is the raw accumulated JSON string; parsing it
+          is the caller's job. Emit ToolCall only after the arguments are
+          complete.
         - Skip reasoning/thinking deltas; yield final text only.
         - Do not catch KeyboardInterrupt (interruption is the Agent's job).
           Keep the yield inside the SDK stream's with block so the

@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from config import Config
 from core.llm import LLMClient, create_client
+from core.llm.events import TextDelta
 from core.observer import AgentObserver, NullObserver
 
 
@@ -62,7 +63,7 @@ class Agent:
         self.ui.start_turn(self.label)
         try:
             parts: List[str] = []
-            for delta in self.client.stream(
+            for event in self.client.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=self.system_prompt,
@@ -71,8 +72,9 @@ class Agent:
                 if self._cancel.is_set():
                     self.ui.interrupted(self.label)
                     return None
-                self.ui.text_delta(self.label, delta)
-                parts.append(delta)
+                if isinstance(event, TextDelta):
+                    self.ui.text_delta(self.label, event.text)
+                    parts.append(event.text)
             self.ui.end_turn(self.label)
             return "".join(parts)
         except KeyboardInterrupt:
