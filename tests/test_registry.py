@@ -55,4 +55,9 @@ def test_duplicate_registration_raises():
 def test_register_builtins():
     registry = ToolRegistry()
     register_builtins(registry)
-    assert {"Read", "Glob", "Grep"} <= set(registry.names())
+    assert set(registry.names()) == {"Read", "Write", "Edit", "Glob", "Grep", "Bash"}
+    approval_required = {
+        name for name in registry.names()
+        if registry.get(name).requires_approval
+    }
+    assert approval_required == {"Write", "Edit", "Bash"}
