@@ -5,10 +5,12 @@ Core Agent Loop (streaming + terminal UI integration).
 - Handles Ctrl+C during generation so the history structure stays intact
   and the conversation can continue after an interruption.
 """
+import threading
 from typing import List, Optional
 
 from config import Config
 from core.llm import LLMClient, create_client
+from core.observer import AgentObserver, NullObserver
 
 
 class Agent:
@@ -18,7 +20,7 @@ class Agent:
         model: Optional[str] = None,
         max_tokens: Optional[int] = None,
         label: str = "agent",
-        ui=None,
+        ui: Optional[AgentObserver] = None,
         client: Optional[LLMClient] = None,
     ):
         # Use the injected client, or select one via environment (LLM_PROTOCOL).
@@ -27,8 +29,13 @@ class Agent:
         self.model = model or Config.MODEL
         self.max_tokens = max_tokens or Config.MAX_TOKENS
         self.label = label
-        self.ui = ui or _NullUI()
+        self.ui = ui or NullObserver()
         self.messages: List[dict] = []
+        self._cancel = threading.Event()
+
+    def request_cancel(self) -> None:
+        """Ask the running generation to stop at the next delta."""
+        self._cancel.set()
 
     def clear(self):
         """Reset the conversation history."""
@@ -51,6 +58,7 @@ class Agent:
         return final_text
 
     def _stream_one_response(self) -> Optional[str]:
+        self._cancel.clear()
         self.ui.start_turn(self.label)
         try:
             parts: List[str] = []
@@ -60,6 +68,9 @@ class Agent:
                 system=self.system_prompt,
                 messages=self.messages,
             ):
+                if self._cancel.is_set():
+                    self.ui.interrupted(self.label)
+                    return None
                 self.ui.text_delta(self.label, delta)
                 parts.append(delta)
             self.ui.end_turn(self.label)
@@ -67,19 +78,3 @@ class Agent:
         except KeyboardInterrupt:
             self.ui.interrupted(self.label)
             return None
-
-
-class _NullUI:
-    """No-op UI for using Agent programmatically without a ui injection (tests etc.)."""
-
-    def start_turn(self, label):
-        pass
-
-    def text_delta(self, label, text):
-        pass
-
-    def end_turn(self, label):
-        pass
-
-    def interrupted(self, label):
-        pass
