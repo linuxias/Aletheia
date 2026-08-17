@@ -99,6 +99,31 @@ so the model's judgment is spent where it matters.
                             └───────────────────────┘
 ```
 
+## Built-in Terminal Tools
+
+The first shipped capability of the agent core: Claude Code-style terminal
+tools, executed in-process and available to the main agent over all three
+protocols (`LLM_PROTOCOL`: `anthropic` / `openai-chat` / `openai-responses`)
+through a protocol-neutral tool-call representation.
+
+| Tool    | What it does                                                    | Approval |
+| ------- | --------------------------------------------------------------- | -------- |
+| `Read`  | Numbered, line-ranged file contents                             | automatic |
+| `Glob`  | Find files by pattern, newest first                             | automatic |
+| `Grep`  | Regex search across files (content / matches / count modes)     | automatic |
+| `Write` | Create or overwrite files (read-before-overwrite enforced)      | per call |
+| `Edit`  | Exact-match replacement with uniqueness check + diff            | per call |
+| `Bash`  | Shell command with timeout, captured stdout/stderr and exit code | per call |
+
+- Dangerous tools (`Write` / `Edit` / `Bash`) ask for confirmation (`y/N`)
+  before each execution; denials go back to the model as tool results so it
+  can adapt.
+- Ctrl+C interrupts streaming or a running tool while keeping the
+  conversation history structurally valid.
+- `ALETHEIA_MAX_TOOL_ROUNDS` (default 20) bounds the stream-execute loop
+  per user input; agentic sessions may want a higher `ALETHEIA_MAX_TOKENS`
+  than the 4096 default.
+
 ## Design Principles
 
 1. **Nothing is true until it survives verification.** Claims are hypotheses by
