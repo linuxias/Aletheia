@@ -131,6 +131,77 @@ async def test_scrolled_up_view_is_never_yanked_back():
         assert transcript.scroll_y == 0  # stays where the user left it
 
 
+async def test_scroll_inside_flush_window_is_not_yanked():
+    """A scroll gesture arriving between a flush and its deferred follow wins."""
+    app = make_app(chunks=["stream chunk\n\n"] * 60, delay=0.05)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await submit(app, pilot, "long stream")
+        transcript = app.query_one(TranscriptView)
+
+        deadline = time.monotonic() + 10.0
+        while transcript.max_scroll_y < 10:
+            assert time.monotonic() < deadline, "stream did not grow the transcript"
+            await pilot.pause()
+            await asyncio.sleep(0.01)
+
+        # Force a flush (which schedules a deferred follow), then perform the
+        # user's scroll on the immediate synchronous path while that follow is
+        # still pending. The follow must honour the gesture, not re-anchor.
+        app.presenter._flush(force=True)
+        transcript.scroll_to(y=0, animate=False, immediate=True)
+
+        watch_until = time.monotonic() + 1.2  # spans the full follow retry deadline
+        while time.monotonic() < watch_until:
+            await pilot.pause()
+            await asyncio.sleep(0.05)
+            assert transcript.scroll_y == 0, "deferred follow yanked the user's scroll"
+        await wait_idle(pilot, app)
+        assert transcript.scroll_y == 0  # stays where the user left it
+
+
+async def test_submit_does_not_move_view_when_content_fits():
+    app = make_app(chunks=["ok"], delay=5.0)  # no token until the assertions are done
+    async with app.run_test(size=(110, 40)) as pilot:
+        await pilot.pause()
+        splash = app.query_one(SplashView)
+        splash_y = splash.region.y
+        transcript = app.query_one(TranscriptView)
+
+        await submit(app, pilot, "Hello")
+
+        deadline = time.monotonic() + 2.0
+        while True:
+            await pilot.pause()
+            await asyncio.sleep(0.02)
+            echo = [s for s in transcript.query(Static) if "Hello" in str(s.content)]
+            if echo and echo[0].region.height:
+                break
+            assert time.monotonic() < deadline, "echo never laid out"
+
+        assert transcript.scroll_y == 0  # nothing moves while content fits
+        assert markdown_sources(app) == []  # lazy assistant slot: no Markdown pre-token
+        assert splash.region.y == splash_y  # splash stays top-aligned
+        assert echo[0].region.y == splash.region.y + splash.region.height + 1  # directly below
+
+        app._agent.client._delay = 0.01
+        await wait_idle(pilot, app)
+
+
+async def test_clear_leaves_view_top_aligned():
+    app = make_app(chunks=["answer line\n\n"] * 40)
+    async with app.run_test(size=(110, 40)) as pilot:
+        await pilot.pause()
+        await submit(app, pilot, "long question")
+        await wait_idle(pilot, app)
+        transcript = app.query_one(TranscriptView)
+        assert transcript.scroll_y > 0  # the long answer overflowed and was followed
+
+        await submit(app, pilot, "/clear")
+        await pilot.pause()
+        assert transcript.scroll_y == 0  # fresh conversation is top-aligned
+
+
 # ---- scenario 1: splash ----
 
 

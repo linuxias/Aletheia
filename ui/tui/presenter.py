@@ -40,14 +40,13 @@ class AgentPresenter:
         return self._busy
 
     def submit(self, text: str) -> None:
-        """Echo the user turn, mount an empty assistant Markdown, and run the turn."""
+        """Echo the user turn and run the turn; the assistant Markdown mounts lazily."""
         self._buffer = []
         self._last_flush = 0.0
         self._markdown = None
         self._busy = True
         self._turn_started = time.monotonic()
         self._transcript.append_user(text)
-        self._markdown = self._transcript.begin_assistant()
         self._status.set_state("thinking", turn_started=self._turn_started)
         self._input.disabled = True
         self._app.run_worker(partial(self._run_turn, text), thread=True, exclusive=True)
@@ -85,6 +84,11 @@ class AgentPresenter:
         """Markdown.update(''.join(buffer)) at most every 0.1 s; force=True on end/interrupt/error."""
         if not self._app.is_running:
             return  # app is shutting down; further Markdown updates only flood stderr
+        # Lazy assistant slot: an empty Markdown("") renders ~4 rows tall, which
+        # would inflate the submit jump and show a blank block before the first
+        # token — so the widget only mounts once text actually arrives.
+        if self._markdown is None and self._buffer:
+            self._markdown = self._transcript.begin_assistant()
         now = time.monotonic()
         if not force and now - self._last_flush < 0.1:
             return
