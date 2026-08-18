@@ -60,6 +60,77 @@ def test_wordmark_six_rows_of_60_columns():
     assert "██████╔╝" not in flat  # corrupted L stem
 
 
+async def wait_pinned(pilot, transcript: TranscriptView, timeout: float = 5.0) -> None:
+    """Poll until the transcript sits within 2 lines of the bottom."""
+    deadline = time.monotonic() + timeout
+    while transcript.scroll_y < transcript.max_scroll_y - 2:
+        assert time.monotonic() < deadline, "view did not follow the stream to the bottom"
+        await pilot.pause()
+        await asyncio.sleep(0.01)
+
+
+# ---- scroll follow (UX audit P0-1) ----
+
+
+async def test_long_streamed_answer_stays_pinned_to_bottom():
+    chunks = [f"line {i} of a long answer\n\n" for i in range(40)]
+    chunks += ["```python\n", "x = 1\ny = 2\n", "```\n", "final line\n"]  # fence repaginates on close
+    app = make_app(chunks=chunks)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await submit(app, pilot, "write a long answer with code")
+        await wait_idle(pilot, app)
+
+        transcript = app.query_one(TranscriptView)
+        assert transcript.max_scroll_y > 0
+        await wait_pinned(pilot, transcript)
+
+
+async def test_long_user_echo_brings_view_to_bottom():
+    app = make_app(chunks=["ok"], delay=5.0)  # no delta until the echo assertion is done
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await submit(app, pilot, "很长的用户输入问题" * 40)  # wraps across ~11 rows
+        transcript = app.query_one(TranscriptView)
+        deadline = time.monotonic() + 2.0
+        while transcript.scroll_y < transcript.max_scroll_y - 2:
+            assert time.monotonic() < deadline, "user echo did not bring the view to the bottom"
+            await pilot.pause()
+            await asyncio.sleep(0.01)
+        # Finish the turn quickly so the app exits cleanly.
+        app._agent.client._delay = 0.01
+        await wait_idle(pilot, app)
+
+
+async def test_scrolled_up_view_is_never_yanked_back():
+    app = make_app(chunks=["stream chunk\n\n"] * 60, delay=0.05)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await submit(app, pilot, "long stream")
+        transcript = app.query_one(TranscriptView)
+
+        deadline = time.monotonic() + 10.0
+        while transcript.max_scroll_y < 10:
+            assert time.monotonic() < deadline, "stream did not grow the transcript"
+            await pilot.pause()
+            await asyncio.sleep(0.01)
+
+        # Scroll up, then re-anchor once so a follow already in flight (captured
+        # before the user scrolled) is drained; the assertion covers flushes
+        # that arrive AFTER the user scrolled.
+        for _ in range(2):
+            transcript.scroll_to(y=0, animate=False)
+            await pilot.pause()
+
+        watch_until = time.monotonic() + 0.6  # several more flush cycles
+        while time.monotonic() < watch_until:
+            await pilot.pause()
+            await asyncio.sleep(0.05)
+            assert transcript.scroll_y == 0, "a flush yanked the scrolled-up view"
+        await wait_idle(pilot, app)
+        assert transcript.scroll_y == 0  # stays where the user left it
+
+
 # ---- scenario 1: splash ----
 
 
@@ -75,6 +146,35 @@ async def test_splash_shows_session_facts_and_ready_status():
         assert app.query_one(StatusBar).state == "ready"
         assert "ready" in str(app.query_one(StatusBar).content)
         assert Config.MODEL in str(app.query_one(StatusBar).content)
+
+
+# ---- splash responsive layout (UX audit P0-2) ----
+
+
+async def test_splash_fits_and_is_readable_at_80_columns():
+    app = make_app(chunks=["ok"])
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        splash = app.query_one(SplashView)
+        info = app.query_one("#info", Static)
+        transcript = app.query_one(TranscriptView)
+        assert info.region.width >= 30  # no per-character truncation of values
+        assert info.region.height <= 12  # rows readable, not one-character-per-row
+        # Splash (bottom border included) sits fully inside the transcript viewport.
+        assert splash.region.y + splash.region.height <= (
+            transcript.region.y + transcript.region.height
+        )
+
+
+async def test_splash_side_by_side_at_100_columns():
+    app = make_app(chunks=["ok"])
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        wordmark = app.query_one("#wordmark", Static)
+        info = app.query_one("#info", Static)
+        assert info.region.width >= 30
+        assert info.region.y == wordmark.region.y  # side by side, not stacked
+        assert "…" in str(info.content)  # shortened cwd form in the splash
 
 
 # ---- scenario 2: happy path ----

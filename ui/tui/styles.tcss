@@ -2,10 +2,17 @@ $accent: #00ff00;   /* ANSI bright green — matches rich "bright_green" in the 
 
 #transcript { height: 1fr; padding: 0 1; }
 
-SplashView { height: auto; margin: 1 1; padding: 1 2; border: round $accent; }
+SplashView { height: auto; margin: 1 1; padding: 1 1; border: round $accent; }
+#splash-row { layout: horizontal; height: auto; }
 #wordmark  { color: $accent; width: auto; margin-right: 2; }
 #info      { width: 1fr; }
 #summary   { color: $text-disabled; margin-top: 1; }
+
+/* Narrow terminals stack the panel under the wordmark (toggled from Python);
+   tightened margins/padding so the stacked splash fits a 24-row terminal. */
+SplashView.narrow #splash-row { layout: vertical; }
+SplashView.narrow { margin: 0 1; padding: 0 1; }
+SplashView.narrow #summary { margin-top: 0; }
 
 #status { height: 1; color: $text-disabled; padding: 0 1; }
 

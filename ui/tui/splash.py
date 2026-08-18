@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal
+from textual.containers import Container
+from textual.events import Resize
 from textual.widgets import Static
 
 WORDMARK: Tuple[str, ...] = (
@@ -19,6 +20,23 @@ WORDMARK: Tuple[str, ...] = (
 
 _TAGLINE = "truth as un-concealment"
 _SUMMARY = "No tools, skills, or MCP servers configured yet — conversation only."
+
+# Below this box width the 60-column wordmark + a 30-column info panel no
+# longer fit beside each other (60 + 2 gap + 30 content + 4 chrome), so
+# SplashView stacks the info panel under the wordmark (see styles.tcss).
+_SIDE_BY_SIDE_MIN_WIDTH = 96
+
+
+def splash_cwd(cwd: str) -> str:
+    """Splash-only cwd form: last two path segments, '…'-prefixed when longer.
+
+    The status bar keeps the full short_cwd() form; this variant only exists
+    so the narrow splash panel never wraps the cwd mid-word.
+    """
+    segments = [segment for segment in cwd.split("/") if segment]
+    if len(segments) <= 2:
+        return cwd
+    return "…/" + "/".join(segments[-2:])
 
 
 def git_branch() -> str:
@@ -96,10 +114,17 @@ class SplashView(Container):
             + [""]
             + [f"[dim]{name:<8}[/dim]{desc}" for name, desc in COMMANDS]
         )
-        with Horizontal():
+        with Container(id="splash-row"):
             yield Static("\n".join(WORDMARK), id="wordmark")
             yield Static(info, id="info")
         yield Static(_SUMMARY, id="summary")
+
+    def on_resize(self, event: Resize) -> None:
+        """Stack the info panel below the wordmark when side by side cannot fit."""
+        if event.size.width < _SIDE_BY_SIDE_MIN_WIDTH:
+            self.add_class("narrow")
+        else:
+            self.remove_class("narrow")
 
     def _info_rows(self) -> Tuple[Tuple[str, str], ...]:
         return (
@@ -107,7 +132,7 @@ class SplashView(Container):
             ("tagline", _TAGLINE),
             ("model", self._model),
             ("protocol", self._protocol),
-            ("cwd", self._cwd),
+            ("cwd", splash_cwd(self._cwd)),
             ("branch", self._branch),
             ("session", self._session_id),
         )
