@@ -7,7 +7,7 @@ from textual.widgets import Input, Markdown
 
 from core.agent import Agent
 
-from ui.tui.status import StatusBar
+from ui.tui.status import HintBar, StatusBar
 from ui.tui.transcript import TranscriptView
 
 if TYPE_CHECKING:
@@ -27,6 +27,7 @@ class AgentPresenter:
         self._agent = agent
         self._transcript = app.query_one(TranscriptView)
         self._status = app.query_one(StatusBar)
+        self._hints = app.query_one(HintBar)
         self._input = app.query_one(Input)
         self._markdown: Optional[Markdown] = None
         self._buffer: List[str] = []  # throttled markdown buffer
@@ -48,6 +49,7 @@ class AgentPresenter:
         self._turn_started = time.monotonic()
         self._transcript.append_user(text)
         self._status.set_state("thinking", turn_started=self._turn_started)
+        self._hints.set_mode("busy")
         self._input.disabled = True
         self._app.run_worker(partial(self._run_turn, text), thread=True, exclusive=True)
 
@@ -99,9 +101,22 @@ class AgentPresenter:
 
     def _on_end(self) -> None:
         self._flush(force=True)
-        if not "".join(self._buffer):
+        text = "".join(self._buffer)
+        if not text:
             self._transcript.append_note("(empty response)")
+        else:
+            self._transcript.append_note(self._stats(text))
         self._finish("ready")
+
+    def _stats(self, text: str) -> str:
+        """Per-turn footer: elapsed time and response size.
+
+        Characters, not tokens: LLMClient.stream() yields text deltas only, so
+        no usage figure reaches the Agent. Reporting a made-up token count
+        would be worse than reporting an honest one we do have.
+        """
+        elapsed = time.monotonic() - self._turn_started
+        return f"⏱ {elapsed:.1f}s · {len(text):,} chars"
 
     def _on_interrupted(self) -> None:
         self._flush(force=True)
@@ -116,5 +131,6 @@ class AgentPresenter:
     def _finish(self, state: str) -> None:
         self._busy = False
         self._status.set_state(state)
+        self._hints.set_mode("interrupted" if state == "interrupted" else "idle")
         self._input.disabled = False
         self._input.focus()

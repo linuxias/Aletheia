@@ -31,8 +31,15 @@ class TranscriptView(ScrollableContainer):
             self.anchor(True)
 
     def append_user(self, text: str) -> None:
-        """Static showing '❯ <text>' with the ❯ in cyan."""
-        self.mount(Static(f"[cyan]❯[/cyan] {escape(text)}"))
+        """Static carrying the user turn, marked by a left rule (see .user-turn).
+
+        A structural rule rather than a coloured glyph: it survives wrapping so
+        a pasted multi-line question still reads as one block, it costs no
+        extra rows, and it works on monochrome terminals. The old "❯ " prefix
+        made user turns indistinguishable from the composer's own prompt.
+        """
+        # escape() so bracket literals in user text are never parsed as markup.
+        self.mount(Static(escape(text), classes="user-turn"))
         # Decide after layout so the just-mounted echo is accounted for:
         # follow when it overflows, otherwise the view does not move.
         self.call_after_refresh(self._follow_if_overflow)
@@ -50,9 +57,21 @@ class TranscriptView(ScrollableContainer):
         # No scroll: notes land at the end of a turn — visible when following,
         # and a user who scrolled up is never yanked.
         if error:
-            self.mount(Static(f"[bold red]{escape(text)}[/bold red]"))
+            self.mount(Static(f"[bold $error]{escape(text)}[/]", classes="note"))
         else:
-            self.mount(Static(f"[dim]{escape(text)}[/dim]"))
+            # No [dim]: `dim` blends 50% toward $background on top of .note's
+            # $text-disabled, landing at 2.90:1. The class carries the tier.
+            self.mount(Static(escape(text), classes="note"))
+
+    def follow_to_end(self) -> None:
+        """Bring freshly mounted content into view if it overflows.
+
+        append_note() deliberately does not scroll — notes trail a turn the
+        user is already watching. Command output is different: it *is* the
+        response, so on a short terminal it would otherwise land below the
+        fold and /help would look like it did nothing.
+        """
+        self.call_after_refresh(self._follow_if_overflow)
 
     def clear_conversation(self, splash: SplashView) -> None:
         """Remove every child and re-mount a fresh splash (used by /clear)."""

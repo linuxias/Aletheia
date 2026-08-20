@@ -26,17 +26,9 @@ _SUMMARY = "No tools, skills, or MCP servers configured yet — conversation onl
 # SplashView stacks the info panel under the wordmark (see styles.tcss).
 _SIDE_BY_SIDE_MIN_WIDTH = 96
 
-
-def splash_cwd(cwd: str) -> str:
-    """Splash-only cwd form: last two path segments, '…'-prefixed when longer.
-
-    The status bar keeps the full short_cwd() form; this variant only exists
-    so the narrow splash panel never wraps the cwd mid-word.
-    """
-    segments = [segment for segment in cwd.split("/") if segment]
-    if len(segments) <= 2:
-        return cwd
-    return "…/" + "/".join(segments[-2:])
+# The wordmark is a fixed 60 columns; below this box width it can only be
+# rendered clipped mid-glyph, which looks like corruption rather than a logo.
+_WORDMARK_MIN_WIDTH = 64
 
 
 def git_branch() -> str:
@@ -84,35 +76,34 @@ def app_version() -> str:
 
 
 class SplashView(Container):
-    """Rounded-border startup box: wordmark left, session info panel right."""
+    """Rounded-border startup box: wordmark left, session info panel right.
 
-    def __init__(
-        self,
-        *,
-        model: str,
-        protocol: str,
-        session_id: str,
-        cwd: str,
-        branch: str,
-    ) -> None:
+    The panel deliberately shows only what the persistent chrome cannot: model
+    lives in the composer's border subtitle and cwd/branch in the status bar,
+    so repeating them here would just be dead weight in a box that scrolls
+    away — and the rows they cost are what the hint bar needs at 80x24.
+    """
+
+    def __init__(self, *, protocol: str, session_id: str) -> None:
         super().__init__()
-        self._model = model
         self._protocol = protocol
         self._session_id = session_id
-        self._cwd = cwd
-        self._branch = branch
 
     @property
     def session_id(self) -> str:
         return self._session_id
 
     def compose(self) -> ComposeResult:
-        from ui.tui.app import COMMANDS  # deferred: app.py imports this module
+        from ui.tui.commands import COMMANDS  # deferred: keeps import order simple
 
+        width = max(len(command.name) for command in COMMANDS) + 2
         info = "\n".join(
-            [f"[dim]{label:<9}[/dim]{value}" for label, value in self._info_rows()]
+            [f"[$text-disabled]{label:<9}[/]{value}" for label, value in self._info_rows()]
             + [""]
-            + [f"[dim]{name:<8}[/dim]{desc}" for name, desc in COMMANDS]
+            + [
+                f"[$text-disabled]{command.name:<{width}}[/]{command.description}"
+                for command in COMMANDS
+            ]
         )
         with Container(id="splash-row"):
             yield Static("\n".join(WORDMARK), id="wordmark")
@@ -120,19 +111,15 @@ class SplashView(Container):
         yield Static(_SUMMARY, id="summary")
 
     def on_resize(self, event: Resize) -> None:
-        """Stack the info panel below the wordmark when side by side cannot fit."""
-        if event.size.width < _SIDE_BY_SIDE_MIN_WIDTH:
-            self.add_class("narrow")
-        else:
-            self.remove_class("narrow")
+        """Stack the info panel below the wordmark when side by side cannot fit,
+        and drop the wordmark entirely once it could only be shown clipped."""
+        self.set_class(event.size.width < _SIDE_BY_SIDE_MIN_WIDTH, "narrow")
+        self.set_class(event.size.width < _WORDMARK_MIN_WIDTH, "tiny")
 
     def _info_rows(self) -> Tuple[Tuple[str, str], ...]:
         return (
             ("version", app_version()),
             ("tagline", _TAGLINE),
-            ("model", self._model),
             ("protocol", self._protocol),
-            ("cwd", splash_cwd(self._cwd)),
-            ("branch", self._branch),
             ("session", self._session_id),
         )

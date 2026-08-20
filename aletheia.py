@@ -11,9 +11,15 @@ Interaction features:
 - Press Ctrl+C during generation to interrupt; the conversation continues afterwards.
 - Supports /help /clear /exit slash commands.
 """
+import os
 import sys
 
 from config import Config
+
+# Kitty keyboard protocol interferes with IME; disabled unconditionally.
+# Must be set before importing Textual (textual.constants reads it at import time).
+os.environ.setdefault("TEXTUAL_DISABLE_KITTY_KEY", "1")
+
 from core.agent import Agent
 from ui.tui.app import AletheiaApp
 

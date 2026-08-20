@@ -118,6 +118,16 @@ so the model's judgment is spent where it matters.
 above describes the target design. Components are being built out incrementally;
 expect the surface to change.
 
+## CJK / Hangul Input
+
+`PromptInput` fixes two CJK issues in Textual's stock `Input`:
+
+1. **Scroll splits double-width glyphs** — scroll offsets are snapped to
+   character boundaries so a Hangul syllable is never cut in half.
+2. **NFD Hangul jams the cursor** — all inserted/pasted text is normalised
+   to NFC, so a syllable like "있" (쌍시옷 받침) is always one character,
+   not three decomposed jamo code points.
+
 ## Contributing
 
 Contributions are welcome once the core structure stabilizes. In the meantime, issues

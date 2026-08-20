@@ -1,10 +1,41 @@
-$accent: #00ff00;   /* ANSI bright green — matches rich "bright_green" in the old console UI */
+/* Colours come from the Aletheia theme (ui/tui/theme.py), never from literals.
 
-#transcript { height: 1fr; padding: 0 1; }
+   The identity green is a three-stop ramp, NOT $accent:
+     $aletheia-green       hero      — wordmark, markdown h1. One at a time.
+     $aletheia-green-soft  active    — focus, live state, "❯". Things that change.
+     $aletheia-green-dim   structure — borders and rules. Things that delimit.
+   $accent is a muted violet and exists only to keep Token.Keyword distinct from
+   Token.Name in markdown fences (see theme.py). $accent is never chrome:
+   `grep -n '\$accent' ui/` should only ever hit markdown-related rules. */
 
-SplashView { height: auto; margin: 1 1; padding: 1 1; border: round $accent; }
+/* A 1-cell scrollbar instead of Textual's default 2: at this width the bar is a
+   position indicator, not a grab handle, and it gives the column back to the
+   text. There is no horizontal scrollbar to size — the transcript wraps. */
+#transcript { height: 1fr; padding: 0 1; scrollbar-size-vertical: 1; }
+
+/* A marker must not out-weigh what it marks: the rule used to be 14.26:1
+   against 7.21:1 text. Now 3.41:1 against 6.88:1 — still green, now
+   subordinate, and threading the identity quietly down the whole conversation.
+   Vertical margin is deliberately zero: the rule alone separates turns, and a
+   margin here would change the splash-to-echo gap that
+   test_submit_does_not_move_view_when_content_fits pins. */
+.user-turn {
+    border-left: wide $aletheia-green-dim;
+    padding-left: 1;
+    margin-left: 1;
+    color: $text-muted;
+}
+
+/* Notes line up with the user turn's rule rather than the viewport edge. The
+   colour lives here, not in a [dim] markup wrapper: `dim` blends 50% toward the
+   background on top of the CSS colour, which landed at 2.90:1. */
+.note { margin-left: 1; color: $text-disabled; }
+
+/* The box is a frame, not the logo: the dim stop, so the wordmark inside it can
+   be the brightest thing in the box. */
+SplashView { height: auto; margin: 1 1; padding: 1 1; border: round $aletheia-green-dim; }
 #splash-row { layout: horizontal; height: auto; }
-#wordmark  { color: $accent; width: auto; margin-right: 2; }
+#wordmark  { color: $aletheia-green; width: auto; margin-right: 2; }
 #info      { width: 1fr; }
 #summary   { color: $text-disabled; margin-top: 1; }
 
@@ -14,8 +45,88 @@ SplashView.narrow #splash-row { layout: vertical; }
 SplashView.narrow { margin: 0 1; padding: 0 1; }
 SplashView.narrow #summary { margin-top: 0; }
 
-#status { height: 1; color: $text-disabled; padding: 0 1; }
+/* Narrower than the fixed-width wordmark: showing it clipped mid-glyph reads
+   as corruption, so the box degrades to the info panel alone. */
+SplashView.tiny #wordmark { display: none; }
 
-#input-row { height: auto; padding: 0 1; }
-#prompt    { width: auto; height: 3; padding: 0 1; content-align: left middle; color: cyan; }
-#input     { height: 3; width: 1fr; }
+/* In normal flow, not on a layer: it borrows rows from the 1fr transcript and
+   leaves the composer where it is. Height is set from Python to the match
+   count. */
+#palette {
+    display: none;
+    height: auto;
+    max-height: 6;
+    border: none;
+    background: $panel;
+    padding: 0 2;   /* padding, not margin — see the #composer note below */
+    scrollbar-size-vertical: 1;
+}
+/* Green-on-green was unreadable; the tint alone carries "selected", so the
+   label stays body-weight (8.64:1). */
+#palette > .option-list--option-highlighted {
+    background: $aletheia-green-soft 20%;
+    color: $text;
+    text-style: bold;
+}
+
+#status { height: 1; color: $text-muted; padding: 0 2; }
+
+/* The composer is one object: the "❯" sits inside the same border as the
+   field, and the border itself is the focus indicator.
+
+   No horizontal margin: in the screen's vertical layout a margin here shrinks
+   every 1fr sibling by the same amount, which left the transcript with a dead
+   2-column gutter on the right and pushed the splash below its side-by-side
+   threshold. The border runs edge to edge instead, and `padding: 0 1` puts its
+   content on column 2 — the same column as the status and hint rows. */
+#composer {
+    height: auto;
+    /* $foreground 30% composited to #464646 = 2.07:1, under the 3:1 floor for
+       meaningful non-text UI — and the border exists precisely so the composer
+       does not vanish while the Input is disabled and ctrl+c matters. The
+       focused pair was also a 6.9x luminance flashbulb; 3.07 -> 6.13 is a 2x
+       step plus a full neutral-to-saturated hue change, which does most of the
+       work. */
+    border: round $border-blurred;
+    /* The model name was rendering in full brand green. It is metadata. */
+    border-subtitle-color: $text-disabled;
+    padding: 0 1;
+}
+#composer:focus-within { border: round $aletheia-green-soft; }
+#prompt { width: auto; height: 1; color: $aletheia-green-soft; margin-right: 1; }
+#input  {
+    height: 1;
+    width: 1fr;
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+
+#hints { height: 1; color: $text-disabled; padding: 0 2; }
+
+/* ---- Assistant markdown ----
+   Textual 8's stock Markdown colours are all theme-derived, so theme.py fixes
+   most of them. Four land wrong on this background and need overriding here.
+
+   NB: an inline component-class `background` only paints when it carries an
+   alpha suffix — `background: $surface` and `background: $surface 100%` both
+   render as no-ops (measured, Textual 8.2.8). Hence `$foreground 20%`. */
+Markdown MarkdownBlock:dark > .code_inline,
+Markdown MarkdownBlock:light > .code_inline {
+    /* Default is `$warning 10%` / `$text-warning 95%` — a literal warning chip
+       around every `identifier`. Same amber, neutral field. */
+    background: $foreground 20%;
+    color: $text-warning;
+}
+
+Markdown {
+    /* Default `black 10%` composited to #0a0a0a — DARKER than the page, 1.01:1,
+       so a fenced block had no visible extent. $surface is a step lighter. */
+    & MarkdownFence { background: $surface; }
+    /* Default keyline is `$foreground 20%` = #333333 = 1.55:1, i.e. invisible. */
+    & MarkdownTableContent { keyline: thin $border; }
+    & MarkdownTableContent > .header { color: $text-muted; }
+    /* Default is `$text-primary 50%` — a green rule with no role distinction
+       from the user-turn rule. Green rule = "you said it", steel = "quoted". */
+    & MarkdownBlockQuote { border-left: outer $secondary; }
+}
