@@ -1,12 +1,22 @@
 """Scrolling conversation area."""
+import re
 import time
-
-from rich.markup import escape
 
 from textual.containers import ScrollableContainer
 from textual.widgets import Markdown, Static
 
 from ui.tui.splash import SplashView
+
+
+# Every '[' becomes a literal: rich.markup.escape() skips bracket groups that
+# do not look like style tags (e.g. '[Denied by user]', '[Errno 2]'), but the
+# renderer still parses and drops them as markup.
+_ESCAPE_RE = re.compile(r"(\\*)\[")
+
+
+def escape(text: str) -> str:
+    """Escape all brackets, preserving existing backslash runs like rich's."""
+    return _ESCAPE_RE.sub(lambda m: m.group(1) + m.group(1) + "\\[", text)
 
 
 class TranscriptView(ScrollableContainer):

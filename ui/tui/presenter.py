@@ -1,12 +1,15 @@
 """Core↔UI bridge: runs Agent turns on worker threads, renders on the UI thread."""
+import threading
 import time
 from functools import partial
 from typing import TYPE_CHECKING, List, Optional
 
 from textual.widgets import Input, Markdown
 
-from core.agent import Agent
+from core.agent import Agent, _arg_summary
+from core.tools.base import Tool
 
+from ui.tui.approval import ToolApprovalScreen
 from ui.tui.status import HintBar, StatusBar
 from ui.tui.transcript import TranscriptView
 
@@ -40,6 +43,11 @@ def _shorten(text: str, max_chars: int = _DISPLAY_CHARS, max_lines: int = _DISPL
     return text
 
 
+# A pending approval waits at most this long before denying; a worker must
+# never block forever on a user who walked away.
+_APPROVAL_TIMEOUT_S = 300.0
+
+
 class AgentPresenter:
     """Runs Agent turns on worker threads and renders observer callbacks on the UI thread.
 
@@ -61,6 +69,8 @@ class AgentPresenter:
         self._turn_started = 0.0
         self._last_flush = 0.0
         agent.ui = self
+        agent.approver = self.confirm_tool
+        self._cancel_requested = False  # set by request_cancel; unblocks a pending approval
 
     @property
     def busy(self) -> bool:
@@ -70,6 +80,7 @@ class AgentPresenter:
         """Echo the user turn and run the turn; the assistant Markdown mounts lazily."""
         self._buffer = []
         self._last_flush = 0.0
+        self._cancel_requested = False
         self._markdown = None
         self._busy = True
         self._turn_started = time.monotonic()
@@ -80,8 +91,43 @@ class AgentPresenter:
         self._app.run_worker(partial(self._run_turn, text), thread=True, exclusive=True)
 
     def request_cancel(self) -> None:
-        """agent.request_cancel() — safe to call from the UI thread while the worker blocks."""
+        """agent.request_cancel() — safe to call from the UI thread while the worker blocks.
+
+        Also denies a pending approval ask and dismisses its modal: a
+        cancelled turn must never still run a dangerous tool.
+        """
+        self._cancel_requested = True
         self._agent.request_cancel()
+        screen = self._app.screen
+        if isinstance(screen, ToolApprovalScreen):
+            screen.dismiss(False)
+
+    def confirm_tool(self, tool: Tool, args: dict) -> bool:
+        """Approval gate for flagged tools, called on the worker thread.
+
+        Blocks the worker until the user answers the modal. Cancel, app
+        shutdown, and timeout all deny: running an unapproved dangerous
+        tool must never be the fallback.
+        """
+        answered = threading.Event()
+        answer: dict = {}
+
+        def ask() -> None:
+            def on_answer(allowed: bool | None) -> None:
+                answer["allowed"] = bool(allowed)
+                answered.set()
+
+            self._app.push_screen(ToolApprovalScreen(tool.name, _arg_summary(args)), on_answer)
+
+        try:
+            self._app.call_from_thread(ask)
+        except Exception:
+            return False  # the app is shutting down; never run an unapproved tool
+        deadline = time.monotonic() + _APPROVAL_TIMEOUT_S
+        while not answered.wait(0.1):
+            if self._cancel_requested or time.monotonic() > deadline:
+                return False
+        return answer.get("allowed", False)
 
     # ---- AgentObserver (worker thread) ----
 

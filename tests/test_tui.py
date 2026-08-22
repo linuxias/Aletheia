@@ -1,5 +1,6 @@
 """Headless TUI tests: Textual run_test() + FakeStreamClient, no network, no tty."""
 import asyncio
+import json
 import time
 from typing import List
 
@@ -9,9 +10,12 @@ from textual.widgets import Input, Markdown, Static
 
 from config import Config
 from core.agent import Agent
+from core.llm.events import ToolCall
+from core.tools import FileState, ToolRegistry, register_builtins
 
 from fake_client import FakeStreamClient
 from ui.tui.app import AletheiaApp
+from ui.tui.approval import ToolApprovalScreen
 from ui.tui.commands import COMMANDS
 from ui.tui.palette import CommandPalette
 from ui.tui.splash import WORDMARK, SplashView, short_cwd
@@ -1109,3 +1113,60 @@ async def test_ctrl_d_exits_only_on_empty_input():
         await pilot.press("ctrl+d")
         await pilot.pause()
         assert not app.is_running
+
+
+# ---- tool approval gate (dangerous tools) ----
+
+
+def _tools_app(tool_round, chunks, tmp_path):
+    registry = ToolRegistry()
+    register_builtins(registry, FileState())
+    client = FakeStreamClient(chunks=chunks, tool_round=tool_round)
+    agent = Agent(system_prompt="test prompt", label="main", client=client, tools=registry)
+    return AletheiaApp(agent=agent), agent
+
+
+async def wait_for_screen(pilot, app, screen_type, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not isinstance(app.screen, screen_type):
+        assert time.monotonic() < deadline, f"timed out waiting for {screen_type.__name__}"
+        await pilot.pause()
+        await asyncio.sleep(0.01)
+
+
+def _write_call(tmp_path, call_id: str) -> ToolCall:
+    return ToolCall(
+        id=call_id,
+        name="Write",
+        arguments=json.dumps({"file_path": str(tmp_path / "out.txt"), "content": "hi"}),
+    )
+
+
+async def test_denied_tool_records_error_result_and_writes_nothing(tmp_path):
+    app, agent = _tools_app([_write_call(tmp_path, "t1")], ["done"], tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await submit(app, pilot, "write it")
+        await wait_for_screen(pilot, app, ToolApprovalScreen)
+        await pilot.press("n")
+        await wait_idle(pilot, app)
+
+        assert not (tmp_path / "out.txt").exists()
+        assert "[Denied by user]" in " ".join(transcript_rendered(app))
+        assert [m["role"] for m in agent.messages] == ["user", "assistant", "tool", "assistant"]
+        assert agent.messages[2]["is_error"] is True
+        assert "done" in " ".join(markdown_sources(app))
+
+
+async def test_allowed_tool_runs_and_answers_the_tool_use(tmp_path):
+    app, agent = _tools_app([_write_call(tmp_path, "t1")], ["done"], tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await submit(app, pilot, "write it")
+        await wait_for_screen(pilot, app, ToolApprovalScreen)
+        await pilot.press("y")
+        await wait_idle(pilot, app)
+
+        assert (tmp_path / "out.txt").read_text() == "hi"
+        assert [m["role"] for m in agent.messages] == ["user", "assistant", "tool", "assistant"]
+        assert agent.messages[2]["is_error"] is False

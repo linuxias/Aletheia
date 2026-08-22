@@ -130,3 +130,32 @@ Markdown {
        from the user-turn rule. Green rule = "you said it", steel = "quoted". */
     & MarkdownBlockQuote { border-left: outer $secondary; }
 }
+
+
+/* ---- approval modal (ui.tui.approval) ---- */
+ToolApprovalScreen {
+    align: center middle;
+}
+
+#approval-dialog {
+    width: auto;
+    max-width: 80;
+    height: auto;
+    padding: 1 2;
+    border: round $warning;
+    background: $surface;
+}
+
+#approval-question {
+    width: auto;
+    margin-bottom: 1;
+}
+
+#approval-buttons {
+    height: auto;
+    align-horizontal: center;
+}
+
+#approval-buttons Button {
+    margin: 0 1;
+}
