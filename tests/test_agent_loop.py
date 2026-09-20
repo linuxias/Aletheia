@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 
 import pytest
 
@@ -333,3 +335,151 @@ def test_tools_passed_to_client_only_with_registry():
     agent = _agent(client, registry)
     agent.run("hello")
     assert client.calls[0][1] == registry.definitions()
+
+
+# ---- parallel batch execution ----
+
+
+class _JoinTool(Tool):
+    """Parallel-safe tool that only finishes when a sibling is also running."""
+
+    name = "Join"
+    description = "blocks until a sibling call is also inside run()"
+    parameters = {
+        "type": "object",
+        "properties": {"marker": {"type": "string"}},
+        "required": ["marker"],
+    }
+    parallel_safe = True
+
+    def __init__(self):
+        super().__init__()
+        self.barrier = threading.Barrier(2, timeout=5)
+
+    def run(self, marker: str) -> str:
+        self.barrier.wait()  # BrokenBarrierError if the calls do not overlap
+        return f"ran {marker}"
+
+
+def test_parallel_safe_calls_run_concurrently():
+    registry = ToolRegistry()
+    registry.register(_JoinTool())
+    client = FakeLLMClient(
+        [
+            [
+                ToolCall(id="t1", name="Join", arguments=json.dumps({"marker": "a"})),
+                ToolCall(id="t2", name="Join", arguments=json.dumps({"marker": "b"})),
+            ],
+            [TextDelta("both overlapped")],
+        ]
+    )
+    agent = _agent(client, registry)
+    assert agent.run("go") == "both overlapped"  # a sequential run would time out
+    assert [m["content"] for m in agent.messages[2:4]] == ["ran a", "ran b"]
+    assert all(m["is_error"] is False for m in agent.messages[2:4])
+
+
+class _SleepyTool(Tool):
+    name = "Sleepy"
+    description = "parallel-safe tool that sleeps before answering"
+    parameters = {
+        "type": "object",
+        "properties": {"marker": {"type": "string"}},
+        "required": ["marker"],
+    }
+    parallel_safe = True
+
+    def run(self, marker: str) -> str:
+        time.sleep(0.15 if marker == "slow" else 0.0)
+        return f"ran {marker}"
+
+
+def test_parallel_results_keep_call_order():
+    registry = ToolRegistry()
+    registry.register(_SleepyTool())
+    client = FakeLLMClient(
+        [
+            [
+                ToolCall(id="t1", name="Sleepy", arguments=json.dumps({"marker": "slow"})),
+                ToolCall(id="t2", name="Sleepy", arguments=json.dumps({"marker": "fast"})),
+            ],
+            [TextDelta("ordered")],
+        ]
+    )
+    agent = _agent(client, registry)
+    assert agent.run("go") == "ordered"
+    # "fast" finishes first, but results stay in the order the model called them
+    assert [m["tool_call_id"] for m in agent.messages[2:4]] == ["t1", "t2"]
+    assert [m["content"] for m in agent.messages[2:4]] == ["ran slow", "ran fast"]
+
+
+def test_sequential_tools_run_in_call_order(tmp_path):
+    """Non-parallel-safe calls keep strict ordering: Write lands before Read."""
+    registry = ToolRegistry()
+    from core.tools.read import ReadTool
+    from core.tools.write import WriteTool
+
+    registry.register(WriteTool())
+    registry.register(ReadTool())
+    target = tmp_path / "ordered.txt"
+    client = FakeLLMClient(
+        [
+            [
+                ToolCall(
+                    id="t1",
+                    name="Write",
+                    arguments=json.dumps({"file_path": str(target), "content": "written first"}),
+                ),
+                ToolCall(id="t2", name="Read", arguments=json.dumps({"file_path": str(target)})),
+            ],
+            [TextDelta("read what was written")],
+        ]
+    )
+    agent = _agent(client, registry)
+    assert agent.run("write then read") == "read what was written"
+    assert "written first" in agent.messages[3]["content"]
+
+
+def test_interrupt_during_parallel_batch_fills_synthetic_results():
+    registry = ToolRegistry()
+    registry.register(_SleepyTool())
+    registry.register(_InterruptingTool())
+    client = FakeLLMClient(
+        [
+            [
+                ToolCall(id="t1", name="Sleepy", arguments=json.dumps({"marker": "slow"})),
+                ToolCall(id="t2", name="Boom", arguments="{}"),
+            ],
+            [TextDelta("never reached")],
+        ]
+    )
+    agent = _agent(client, registry)
+    assert agent.run("go") == "[Tool execution was interrupted]"
+    # the still-running parallel call and the never-started one both get
+    # synthetic results: every tool_use stays answered
+    results = agent.messages[2:4]
+    assert [r["tool_call_id"] for r in results] == ["t1", "t2"]
+    assert all(r["content"] == "[Interrupted by user before execution]" for r in results)
+    assert all(r["is_error"] for r in results)
+
+
+def test_tool_bug_does_not_stop_sibling_calls():
+    """A crashing tool ruins its own result; the rest of the batch still runs."""
+    registry = ToolRegistry()
+    registry.register(_BuggyTool())
+    registry.register(_NoArgTool())
+    client = FakeLLMClient(
+        [
+            [
+                ToolCall(id="t1", name="Buggy", arguments="{}"),
+                ToolCall(id="t2", name="Ping", arguments="{}"),
+            ],
+            [TextDelta("recovered")],
+        ]
+    )
+    agent = _agent(client, registry)
+    assert agent.run("x") == "recovered"
+    assert agent.messages[2]["content"] == "Error: ValueError: boom"
+    assert agent.messages[2]["is_error"] is True
+    assert agent.messages[3]["content"] == "pong"
+    assert agent.messages[3]["is_error"] is False

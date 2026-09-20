@@ -106,23 +106,48 @@ tools, executed in-process and available to the main agent over all three
 protocols (`LLM_PROTOCOL`: `anthropic` / `openai-chat` / `openai-responses`)
 through a protocol-neutral tool-call representation.
 
-| Tool    | What it does                                                    | Approval |
-| ------- | --------------------------------------------------------------- | -------- |
-| `Read`  | Numbered, line-ranged file contents                             | automatic |
-| `Glob`  | Find files by pattern, newest first                             | automatic |
-| `Grep`  | Regex search across files (content / matches / count modes)     | automatic |
-| `Write` | Create or overwrite files (read-before-overwrite enforced)      | per call |
-| `Edit`  | Exact-match replacement with uniqueness check + diff            | per call |
-| `Bash`  | Shell command with timeout, captured stdout/stderr and exit code | per call |
+| Tool        | What it does                                                    | Approval |
+| ----------- | --------------------------------------------------------------- | -------- |
+| `Read`      | Numbered, line-ranged file contents                             | automatic |
+| `Glob`      | Find files by pattern, newest first                             | automatic |
+| `Grep`      | Regex search across files (content / matches / count modes)     | automatic |
+| `Write`     | Create or overwrite files (read-before-overwrite enforced)      | per call |
+| `Edit`      | Exact-match replacement with uniqueness check + diff            | per call |
+| `Bash`      | Shell command with timeout, captured stdout/stderr and exit code | per call |
+| `TodoWrite` | Replace the session's plan/checklist; returns the rendered list | automatic |
+| `Task`      | Spawn a subagent with a fresh context; returns its final report | automatic** |
 
 - Dangerous tools (`Write` / `Edit` / `Bash`) ask for confirmation (`y/N`)
   before each execution; denials go back to the model as tool results so it
-  can adapt.
+  can adapt. ** `Task` itself needs no approval, but dangerous tools used
+  *inside* a subagent still do; approvals from parallel subagents are
+  serialised into one modal at a time.
 - Ctrl+C interrupts streaming or a running tool while keeping the
-  conversation history structurally valid.
+  conversation history structurally valid. Already-running subagents
+  finish their current work; calls that never produced output get
+  synthetic results so the history stays protocol-valid.
 - `ALETHEIA_MAX_TOOL_ROUNDS` (default 20) bounds the stream-execute loop
   per user input; agentic sessions may want a higher `ALETHEIA_MAX_TOKENS`
   than the 4096 default.
+
+### Planning: TodoWrite
+
+`TodoWrite` holds the session's live plan — the detailed checklist for
+multi-step work such as an experiment campaign. Each call replaces the
+whole list (send every todo, not just the changed ones); the rendered
+checklist comes back as the tool result so the plan stays visible in the
+conversation.
+
+### Delegation: Task and parallel subagents
+
+`Task` spawns a subagent with its own fresh context: it shares the
+parent's LLM client, tools, and approval gate, but sees none of the parent
+conversation and cannot spawn further subagents (delegation is one level
+deep). Its final report is the tool result. When the model issues several
+`Task` calls in one response they run **concurrently** — one subagent per
+experiment — while file/shell tools in the same batch stay sequential.
+Subagent tool activity is shown in the transcript tagged with the
+subagent's label.
 
 ## Design Principles
 

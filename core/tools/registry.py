@@ -13,6 +13,19 @@ class ToolRegistry:
             raise KeyError(f"tool already registered: {tool.name}")
         self._tools[tool.name] = tool
 
+    def without(self, *names: str) -> "ToolRegistry":
+        """A new registry sharing this one's Tool instances, minus `names`.
+
+        Used to hand subagents the parent's tools without the Task tool,
+        keeping delegation one level deep. The tools themselves (and any
+        state they hold, e.g. FileState) are shared, not copied.
+        """
+        clone = ToolRegistry()
+        for name, tool in self._tools.items():
+            if name not in names:
+                clone.register(tool)
+        return clone
+
     def get(self, name: str) -> Optional[Tool]:
         return self._tools.get(name)
 

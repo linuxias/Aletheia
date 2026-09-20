@@ -50,6 +50,11 @@ class Tool(ABC):
     parameters: ClassVar[dict]
     # Tools that mutate the system require per-call user approval.
     requires_approval: ClassVar[bool] = False
+    # Parallel-safe tools may be dispatched concurrently with their sibling
+    # calls when the model batches several tool calls into one response.
+    # They must not depend on execution order or hold exclusive mutable
+    # state; tools that touch the filesystem or the shell stay sequential.
+    parallel_safe: ClassVar[bool] = False
 
     def __init__(self, file_state: Optional[FileState] = None):
         self.file_state = file_state

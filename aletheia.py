@@ -9,8 +9,10 @@ Optional override: LLM_BASE_URL in .env (defaults to the per-protocol endpoint)
 Interaction features:
 - Responses are streamed in real time as rendered Markdown.
 - Press Ctrl+C during generation to interrupt; the conversation continues afterwards.
-- The agent uses terminal tools (Read, Write, Edit, Glob, Grep, Bash);
-  Write/Edit/Bash ask for confirmation before each run.
+- The agent uses terminal tools (Read, Write, Edit, Glob, Grep, Bash) plus
+  TodoWrite for planning and Task to spawn subagents; Write/Edit/Bash ask
+  for confirmation before each run.
+- Several Task calls in one response run as parallel subagents.
 - Supports /help /clear /exit slash commands.
 """
 import os
@@ -24,6 +26,7 @@ os.environ.setdefault("TEXTUAL_DISABLE_KITTY_KEY", "1")
 
 from core.agent import Agent
 from core.tools import FileState, ToolRegistry, register_builtins
+from core.tools.task import create_task_tool
 from ui.tui.app import AletheiaApp
 
 MAIN_SYSTEM_PROMPT = """You are the main agent of the Aletheia platform.
@@ -36,6 +39,14 @@ MAIN_SYSTEM_PROMPT = """You are the main agent of the Aletheia platform.
   verify edits by reading the file back.
 - When a tool returns an error, adjust the call and retry instead of
   asking the user.
+- Plan multi-step work with TodoWrite before starting it: lay out the
+  steps, keep exactly one in_progress, and mark steps completed as they
+  finish.
+- Delegate self-contained subtasks to Task subagents. Subagents do not
+  see this conversation, so their prompt must carry every detail (goal,
+  file paths, expected report format). Issue several Task calls in one
+  response to run independent subtasks in parallel — for example, one
+  subagent per experiment.
 """
 
 
@@ -59,6 +70,9 @@ def main() -> None:
     except ValueError as e:
         print(f"[Error] {e}")
         sys.exit(1)
+    # Task is bound to this agent: subagents share its client, tools and
+    # approval gate, but cannot spawn further subagents.
+    registry.register(create_task_tool(agent))
 
     AletheiaApp(agent=agent).run()
 

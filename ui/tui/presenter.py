@@ -68,6 +68,7 @@ class AgentPresenter:
         self._busy = False  # a turn is in flight
         self._turn_started = 0.0
         self._last_flush = 0.0
+        self._approval_lock = threading.RLock()  # one approval modal at a time
         agent.ui = self
         agent.approver = self.confirm_tool
         self._cancel_requested = False  # set by request_cancel; unblocks a pending approval
@@ -107,8 +108,16 @@ class AgentPresenter:
 
         Blocks the worker until the user answers the modal. Cancel, app
         shutdown, and timeout all deny: running an unapproved dangerous
-        tool must never be the fallback.
+        tool must never be the fallback. Parallel subagents can ask at the
+        same time; the lock serialises them into one modal at a time (the
+        askers queue on it), so stacked modals never compete.
         """
+        with self._approval_lock:
+            if self._cancel_requested:
+                return False  # a cancelled turn must not surface new modals
+            return self._ask_approval(tool, args)
+
+    def _ask_approval(self, tool: Tool, args: dict) -> bool:
         answered = threading.Event()
         answer: dict = {}
 
@@ -145,10 +154,10 @@ class AgentPresenter:
         self._app.call_from_thread(self._on_interrupted)
 
     def tool_call(self, label: str, name: str, summary: str) -> None:
-        self._app.call_from_thread(self._on_tool_call, name, summary)
+        self._app.call_from_thread(self._on_tool_call, label, name, summary)
 
     def tool_result(self, label: str, name: str, output: str, is_error: bool) -> None:
-        self._app.call_from_thread(self._on_tool_result, name, output, is_error)
+        self._app.call_from_thread(self._on_tool_result, label, name, output, is_error)
 
     # ---- worker body (worker thread) ----
 
@@ -201,16 +210,21 @@ class AgentPresenter:
         self._transcript.append_note("[interrupted]")
         self._finish("interrupted")
 
-    def _on_tool_call(self, name: str, summary: str) -> None:
+    def _on_tool_call(self, label: str, name: str, summary: str) -> None:
         self._flush(force=True)
-        line = f"{name} {summary}".rstrip()
+        line = f"{self._agent_prefix(label)}{name} {summary}".rstrip()
         self._transcript.append_note(f"tool {line}")
 
-    def _on_tool_result(self, name: str, output: str, is_error: bool) -> None:
+    def _on_tool_result(self, label: str, name: str, output: str, is_error: bool) -> None:
         self._flush(force=True)
         body = output.strip() or "(no output)"
         prefix = "[tool error] " if is_error else ""
-        self._transcript.append_note(f"{prefix}{name}: {_shorten(body)}", error=is_error)
+        who = self._agent_prefix(label)
+        self._transcript.append_note(f"{prefix}{who}{name}: {_shorten(body)}", error=is_error)
+
+    def _agent_prefix(self, label: str) -> str:
+        """Subagent activity is tagged with its label; the main agent is not."""
+        return f"[{label}] " if label != self._agent.label else ""
 
     def _on_error(self, error: Exception) -> None:
         self._flush(force=True)

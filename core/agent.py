@@ -4,13 +4,17 @@ Core Agent Loop (streaming + terminal UI integration).
 - Streams responses in real time through the protocol-agnostic LLMClient interface.
 - Runs a bounded tool loop: stream, execute requested tools, feed results
   back, stream again, until the model answers without tool calls.
+- Executes each response's tool calls as a batch: parallel-safe tools (e.g.
+  Task) are dispatched to a thread pool so sibling calls run concurrently,
+  everything else runs sequentially in call order.
 - Handles Ctrl+C so the history structure stays protocol-valid (every
   tool_use is answered by a tool_result) and the conversation can continue
   after an interruption.
 """
 import json
 import threading
-from typing import Callable, List, Optional, Tuple
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Callable, Dict, List, Optional, Tuple
 
 from config import Config
 from core.llm import LLMClient, create_client
@@ -18,6 +22,9 @@ from core.llm.events import TextDelta, ToolCall
 from core.observer import AgentObserver, NullObserver
 from core.tools.base import Tool
 from core.tools.registry import ToolRegistry
+
+# Upper bound on threads used for the parallel-safe calls of one batch.
+_MAX_PARALLEL_TOOLS = 8
 
 
 class Agent:
@@ -143,78 +150,106 @@ class Agent:
     def _execute_tool_calls(
         self, tool_calls: List[ToolCall], parsed: List[Tuple[dict, Optional[str]]]
     ) -> Tuple[List[dict], bool]:
-        """Execute calls in order; returns (results, interrupted).
+        """Execute one response's calls as a batch; returns (results, interrupted).
 
-        Exactly one result is appended per tool_use in every path —
+        Parallel-safe tools (e.g. Task) are submitted to a thread pool so
+        sibling calls run concurrently; the others run sequentially in call
+        order on this thread. Results are assembled in call order either
+        way. Exactly one result is produced per tool_use in every path —
         approval denial, argument parse failure, tool crash, and user
         interruption included — so the history stays protocol-valid for
         the next round.
         """
-        results: List[dict] = []
+        results: List[Optional[dict]] = [None] * len(tool_calls)
+        futures: Dict[int, Future] = {}
+        executor: Optional[ThreadPoolExecutor] = None
         try:
-            for call, (args, parse_error) in zip(tool_calls, parsed):
+            for i, (call, (args, parse_error)) in enumerate(zip(tool_calls, parsed)):
                 self.ui.tool_call(self.label, call.name, _arg_summary(args))
                 tool = self.tools.get(call.name) if self.tools else None
-                if parse_error is not None:
-                    output, is_error = parse_error, True
-                elif tool is None:
-                    output, is_error = f"Error: unknown tool {call.name!r}", True
-                elif (
-                    tool.requires_approval
-                    and self.approver is not None
-                    and not self.approver(tool, args)
-                ):
-                    output, is_error = "[Denied by user]", True
+                if parse_error is None and tool is not None and tool.parallel_safe:
+                    if executor is None:
+                        executor = ThreadPoolExecutor(
+                            max_workers=min(_MAX_PARALLEL_TOOLS, len(tool_calls)),
+                            thread_name_prefix="aletheia-tool",
+                        )
+                    futures[i] = executor.submit(self._run_one, call, args, parse_error)
                 else:
-                    output, is_error = self.tools.execute(call.name, args)
-                self.ui.tool_result(self.label, call.name, output, is_error)
-                results.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": output,
-                        "is_error": is_error,
-                    }
-                )
+                    results[i] = self._run_one(call, args, parse_error)
+            for i in sorted(futures):
+                results[i] = futures[i].result()
         except KeyboardInterrupt:
             self.ui.interrupted(self.label)
-            # Anthropic requires a tool_result for every tool_use before the
-            # next assistant turn: fill in synthetic results for the calls
-            # that never ran (including the interrupted one).
-            for call in tool_calls[len(results):]:
-                results.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": "[Interrupted by user before execution]",
-                        "is_error": True,
-                    }
-                )
+            # Running pool threads cannot be killed; their eventual output
+            # is dropped. Anthropic requires a tool_result for every
+            # tool_use before the next assistant turn, so every call that
+            # never produced a result gets a synthetic one.
+            if executor is not None:
+                executor.shutdown(wait=False, cancel_futures=True)
+            for i, call in enumerate(tool_calls):
+                if results[i] is None:
+                    results[i] = _synthetic_result(call, "[Interrupted by user before execution]")
             return results, True
         except Exception as e:
-            # A tool bug must not corrupt the history either: report it as
-            # the result of the in-flight call, skip the rest.
-            in_flight = tool_calls[len(results)]
-            results.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": in_flight.id,
-                    "content": f"Error: {type(e).__name__}: {e}",
-                    "is_error": True,
-                }
-            )
-            for call in tool_calls[len(results):]:
-                results.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": "[Not executed: earlier tool failed]",
-                        "is_error": True,
-                    }
+            # A harness bug (tool bugs are caught per call in _run_one)
+            # must not corrupt the history either: report it against the
+            # first call without a result, mark the rest not executed.
+            if executor is not None:
+                executor.shutdown(wait=False, cancel_futures=True)
+            pending = [i for i, r in enumerate(results) if r is None]
+            for j, i in enumerate(pending):
+                content = (
+                    f"Error: {type(e).__name__}: {e}"
+                    if j == 0
+                    else "[Not executed: earlier tool failed]"
                 )
+                results[i] = _synthetic_result(tool_calls[i], content)
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=False)
         return results, False
+
+    def _run_one(
+        self, call: ToolCall, args: dict, parse_error: Optional[str]
+    ) -> dict:
+        """Resolve one tool call to its result message; never raises for
+        tool-level failures (errors become the tool result so the model
+        can adjust and retry)."""
+        tool = self.tools.get(call.name) if self.tools else None
+        if parse_error is not None:
+            output, is_error = parse_error, True
+        elif tool is None:
+            output, is_error = f"Error: unknown tool {call.name!r}", True
+        elif (
+            tool.requires_approval
+            and self.approver is not None
+            and not self.approver(tool, args)
+        ):
+            output, is_error = "[Denied by user]", True
+        else:
+            try:
+                output, is_error = self.tools.execute(call.name, args)
+            except Exception as e:
+                output, is_error = f"Error: {type(e).__name__}: {e}", True
+        self.ui.tool_result(self.label, call.name, output, is_error)
+        return {
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": output,
+            "is_error": is_error,
+        }
 
 
 def _arg_summary(args: dict) -> str:
     summary = " ".join(f"{k}={str(v)[:40]}" for k, v in list(args.items())[:3])
     return summary.replace("\n", " ")[:100]
+
+
+def _synthetic_result(call: ToolCall, content: str) -> dict:
+    """A stand-in tool_result for a call that never produced output."""
+    return {
+        "role": "tool",
+        "tool_call_id": call.id,
+        "content": content,
+        "is_error": True,
+    }

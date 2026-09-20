@@ -55,9 +55,21 @@ def test_duplicate_registration_raises():
 def test_register_builtins():
     registry = ToolRegistry()
     register_builtins(registry)
-    assert set(registry.names()) == {"Read", "Write", "Edit", "Glob", "Grep", "Bash"}
+    assert set(registry.names()) == {
+        "Read", "Write", "Edit", "Glob", "Grep", "Bash", "TodoWrite",
+    }
     approval_required = {
         name for name in registry.names()
         if registry.get(name).requires_approval
     }
     assert approval_required == {"Write", "Edit", "Bash"}
+
+
+def test_without_shares_tools_but_drops_names():
+    registry = ToolRegistry()
+    registry.register(_DummyTool())
+    other = registry.without("dummy")
+    assert other.names() == []
+    clone = registry.without("missing")
+    assert clone.names() == ["dummy"]
+    assert clone.get("dummy") is registry.get("dummy")  # shared, not copied
