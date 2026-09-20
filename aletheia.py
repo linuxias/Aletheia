@@ -29,12 +29,12 @@ from core.tools import FileState, ToolRegistry, register_builtins
 from core.tools.task import create_task_tool
 from ui.tui.app import AletheiaApp
 
-MAIN_SYSTEM_PROMPT = """You are the main agent of the Aletheia platform.
+MAIN_SYSTEM_PROMPT_TEMPLATE = """You are the main agent of the Aletheia platform.
 
 - Answer the user's questions accurately and faithfully.
 - Refer to the conversation history to maintain context.
-- You can call tools (Read, Write, Edit, Glob, Grep, Bash) to inspect and
-  change files and to run shell commands.
+- You can call tools ({tools}) to inspect and change files and to run
+  shell commands, plan, and delegate.
 - Prefer Read/Glob/Grep over Bash (cat/ls/grep) for file inspection, and
   verify edits by reading the file back.
 - When a tool returns an error, adjust the call and retry instead of
@@ -50,6 +50,16 @@ MAIN_SYSTEM_PROMPT = """You are the main agent of the Aletheia platform.
 """
 
 
+def build_main_system_prompt(tool_names) -> str:
+    """Render the main system prompt with the live tool inventory.
+
+    Derived from the registry so the prompt never drifts from the tools
+    the model actually receives; callers append the agent-bound tools
+    (Task) that are registered after the Agent exists.
+    """
+    return MAIN_SYSTEM_PROMPT_TEMPLATE.format(tools=", ".join(tool_names))
+
+
 def main() -> None:
     if not Config.API_KEY:
         print("LLM_KEY is not configured in the .env file.")
@@ -61,7 +71,7 @@ def main() -> None:
     register_builtins(registry, file_state)
     try:
         agent = Agent(
-            system_prompt=MAIN_SYSTEM_PROMPT,
+            system_prompt=build_main_system_prompt(registry.names() + ["Task"]),
             label="main",
             # The TUI presenter takes over as observer and approval gate
             # when the app mounts (agent.ui / agent.approver).

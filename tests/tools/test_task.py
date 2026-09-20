@@ -141,6 +141,10 @@ def test_subagent_isolated_history_and_no_delegation():
     # the subagent conversation: fresh history, its own system prompt
     assert sub_round["messages"] == [{"role": "user", "content": "go measure the thing"}]
     assert "subagent" in sub_round["system"].lower()
+    # the prompt's tool inventory is derived from the registry: it names
+    # what the subagent has and never claims the withheld Task tool
+    assert "Ping" in sub_round["system"]
+    assert "Task" not in sub_round["system"]
     # one level deep: the subagent's tool list has no Task tool
     assert [d["name"] for d in sub_round["tools"]] == ["Ping"]
     # the parent's history holds the report as the Task tool result

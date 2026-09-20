@@ -45,18 +45,26 @@ class TaskTool(Tool):
         return clip(report) if report else "(subagent returned no report)"
 
 
-SUBAGENT_SYSTEM_PROMPT = """You are a subagent of the Aletheia platform, spawned to complete one
+SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """You are a subagent of the Aletheia platform, spawned to complete one
 specific task.
 
-- Work autonomously with the available tools (Read, Write, Edit, Glob,
-  Grep, Bash, TodoWrite). Do not ask questions — make reasonable
-  assumptions and note them in your report.
+- Work autonomously with the available tools ({tools}). Do not ask
+  questions — make reasonable assumptions and note them in your report.
 - You cannot see the spawning conversation and cannot spawn further
   subagents.
 - When the task is done (or truly blocked), reply with your final report
   as plain text: the outcome, what you did, and the key findings. That
   report is the only thing returned to the spawning agent.
 """
+
+
+def build_subagent_prompt(tool_names) -> str:
+    """Render the subagent system prompt with the live tool inventory.
+
+    The list is derived from the registry, never hardcoded: the prompt
+    must not claim tools the subagent lacks (or hide tools it has).
+    """
+    return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(tools=", ".join(tool_names) or "none")
 
 
 def create_task_tool(parent: "Agent") -> TaskTool:
@@ -72,10 +80,11 @@ def create_task_tool(parent: "Agent") -> TaskTool:
     from core.observer import SubagentObserver
 
     sub_tools = parent.tools.without("Task") if parent.tools is not None else None
+    system_prompt = build_subagent_prompt(sub_tools.names() if sub_tools else [])
 
     def factory(description: str) -> Agent:
         return Agent(
-            system_prompt=SUBAGENT_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             label=f"sub:{description[:16]}",
             model=parent.model,
             max_tokens=parent.max_tokens,
