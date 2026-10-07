@@ -27,7 +27,7 @@ markers = [
 
 [tool.setuptools]
 py-modules = ["aletheia", "config"]
-packages = ["core", "core.llm", "core.tools", "ui", "ui.tui"]
+packages = ["core", "core.llm", "core.sandbox", "core.tools", "ui", "ui.tui"]
 
 [dependency-groups]
 dev = [

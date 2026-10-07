@@ -129,6 +129,10 @@ through a protocol-neutral tool-call representation.
 - `ALETHEIA_MAX_TOOL_ROUNDS` (default 20) bounds the stream-execute loop
   per user input; agentic sessions may want a higher `ALETHEIA_MAX_TOKENS`
   than the 4096 default.
+- `ALETHEIA_SANDBOX` selects where Bash commands run: `local` (default,
+  directly on the host) or `bwrap`, which wraps each command in a
+  bubblewrap namespace — network blocked, writes limited to the working
+  directory and /tmp, environment scrubbed to a small passthrough list.
 
 ### Planning: TodoWrite
 

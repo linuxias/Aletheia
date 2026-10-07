@@ -92,6 +92,11 @@ class AletheiaApp(App):
         self.presenter = AgentPresenter(app=self, agent=self._agent)
         self.query_one("#composer").border_subtitle = Config.MODEL[:_MAX_SUBTITLE]
         self.query_one(TranscriptView).mount_splash(self._make_splash())
+        if Config.SANDBOX != "local":
+            self.query_one(TranscriptView).append_note(
+                f"[sandbox] {Config.SANDBOX}: Bash runs sandboxed — "
+                "network blocked, writes limited to the working directory and /tmp"
+            )
         self.query_one(Input).focus()
 
     def _make_splash(self) -> SplashView:

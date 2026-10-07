@@ -1,7 +1,9 @@
 """Bash tool: shell command execution with timeout and output clipping."""
-import subprocess
+from typing import Optional
 
-from core.tools.base import Tool, clip
+from core.sandbox.base import Sandbox, SandboxError
+from core.sandbox.local import default_sandbox
+from core.tools.base import FileState, Tool, clip
 
 DEFAULT_TIMEOUT = 120
 MAX_TIMEOUT = 600
@@ -28,40 +30,28 @@ class BashTool(Tool):
     }
     requires_approval = True
 
+    def __init__(
+        self,
+        file_state: Optional[FileState] = None,
+        sandbox: Optional[Sandbox] = None,
+    ):
+        super().__init__(file_state)
+        self.sandbox = sandbox if sandbox is not None else default_sandbox
+
     def run(self, command: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         seconds = min(max(1, int(timeout)), MAX_TIMEOUT)
         try:
-            proc = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=seconds,
-            )
-        except subprocess.TimeoutExpired as e:
-            return f"Error: command timed out after {seconds}s" + _partial(e)
-        except OSError as e:
-            return f"Error: {e}"
+            result = self.sandbox.run_command(command, seconds)
+        except SandboxError as e:
+            return f"Error: {e}" + e.detail
 
         sections = []
-        if proc.stdout:
-            sections.append(proc.stdout.rstrip("\n"))
-        if proc.stderr:
-            sections.append("--- stderr ---\n" + proc.stderr.rstrip("\n"))
-        if proc.returncode != 0:
-            sections.append(f"Exit code: {proc.returncode}")
+        if result.stdout:
+            sections.append(result.stdout.rstrip("\n"))
+        if result.stderr:
+            sections.append("--- stderr ---\n" + result.stderr.rstrip("\n"))
+        if result.exit_code != 0:
+            sections.append(f"Exit code: {result.exit_code}")
         if not sections:
             return "(no output)"
         return clip("\n".join(sections))
-
-
-def _partial(e: subprocess.TimeoutExpired) -> str:
-    """Best-effort partial output captured before a timeout."""
-    parts = []
-    for label, chunk in (("stdout", e.stdout), ("stderr", e.stderr)):
-        if not chunk:
-            continue
-        if isinstance(chunk, bytes):
-            chunk = chunk.decode("utf-8", errors="replace")
-        parts.append(f"\n--- partial {label} ---\n{chunk}")
-    return "".join(parts)

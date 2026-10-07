@@ -25,6 +25,7 @@ from config import Config
 os.environ.setdefault("TEXTUAL_DISABLE_KITTY_KEY", "1")
 
 from core.agent import Agent
+from core.sandbox import create_sandbox
 from core.tools import FileState, ToolRegistry, register_builtins
 from core.tools.task import create_task_tool
 from ui.tui.app import AletheiaApp
@@ -68,7 +69,12 @@ def main() -> None:
 
     file_state = FileState()
     registry = ToolRegistry()
-    register_builtins(registry, file_state)
+    try:
+        sandbox = create_sandbox(Config.SANDBOX)
+    except ValueError as e:
+        print(f"[Error] {e}")
+        sys.exit(1)
+    register_builtins(registry, file_state, sandbox=sandbox)
     try:
         agent = Agent(
             system_prompt=build_main_system_prompt(registry.names() + ["Task"]),

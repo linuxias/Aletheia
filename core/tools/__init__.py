@@ -1,6 +1,7 @@
 """Built-in tools: Read, Write, Edit, Glob, Grep, Bash, TodoWrite (+ Task wiring)."""
 from typing import Optional
 
+from core.sandbox.base import Sandbox
 from core.tools.base import FileState, Tool, clip
 from core.tools.registry import ToolRegistry
 from core.tools.todo import TodoState, TodoWrite
@@ -19,6 +20,7 @@ def register_builtins(
     registry: ToolRegistry,
     file_state: Optional[FileState] = None,
     todo_state: Optional[TodoState] = None,
+    sandbox: Optional[Sandbox] = None,
 ) -> None:
     """Register the session tools: the six terminal tools plus TodoWrite.
 
@@ -38,7 +40,7 @@ def register_builtins(
         EditTool(file_state),
         GlobTool(),
         GrepTool(),
-        BashTool(),
+        BashTool(file_state, sandbox),
         TodoWrite(todo_state),
     ):
         registry.register(tool)

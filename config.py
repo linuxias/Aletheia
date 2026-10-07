@@ -35,6 +35,9 @@ class Config:
     # Max stream-execute round trips per user input in the tool loop
     MAX_TOOL_ROUNDS = int(os.environ.get("ALETHEIA_MAX_TOOL_ROUNDS", "20"))
 
+    # Sandbox backend for Bash commands: local (default) / bwrap
+    SANDBOX = os.environ.get("ALETHEIA_SANDBOX", "local")
+
     API_KEY = os.environ.get("LLM_KEY")
 
     # When unset, the per-protocol default endpoint (core.llm adapter) is used.
